@@ -760,14 +760,14 @@ The following settings are defined in HTTP/QUIC:
   SETTINGS_MAX_HEADER_LIST_SIZE (0x6):
   : An integer with a maximum value of 2^30 - 1
 
+  SETTINGS_BLOCKING_HEADER_REFERENCES (0x7):
+  : A Boolean
+
 #### Usage in 0-RTT
 
 When a 0-RTT QUIC connection is being used, the client's initial requests will
 be sent before the arrival of the server's SETTINGS frame.  Clients SHOULD
-cache at least the following settings about servers:
-
-  - SETTINGS_HEADER_TABLE_SIZE
-  - SETTINGS_MAX_HEADER_LIST_SIZE
+cache at least the settings defined in this document.
 
 Clients MUST comply with cached settings until the server's current settings are
 received.  If a client does not have cached values, it SHOULD assume the
@@ -775,6 +775,7 @@ following values:
 
   - SETTINGS_HEADER_TABLE_SIZE:  0 octets
   - SETTINGS_MAX_HEADER_LIST_SIZE:  16,384 octets
+  - SETTINGS_BLOCKING_HEADER_REFERENCES:  False
 
 Servers MAY continue processing data from clients which exceed its current
 configuration during the initial flight.  In this case, the client MUST apply
