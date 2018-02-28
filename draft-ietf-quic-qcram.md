@@ -146,6 +146,24 @@ In order to ensure table consistency and simplify update management, all table
 updates occur on the control stream rather than on request streams. Request
 streams contain only header blocks, which do not modify the state of the table.
 
+## Primitives
+
+The prefixed integer from Section 5.1 of [RFC7541] is used heavily throughout
+this document.  The string literal, defined by Section 5.2 of [RFC7541], is used
+with the following modification.
+
+HPACK defines string literals to begin on a byte boundary.  They begin with a
+single flag (indicating whether the string is Huffman-coded), followed by the
+Length encoded as a 7-bit prefix integer, and finally Length octets of data.
+
+QCRAM permits strings to begin other than on a byte boundary.  An "N-bit prefix
+string literal" begins with the same Huffman flag, followed by the length
+encoded as an (N-1)-bit prefix integer.  The remainder of the string literal is
+unmodified.
+
+A string literal without a prefix length noted is an 8-bit prefix string literal
+and follows the definitions in [RFC7541] without modification.
+
 ## HEADERS Frames on the Control Stream
 
 Table updates can add a table entry, possibly using existing entries to avoid
@@ -154,14 +172,18 @@ to an existing entry in either table or as a string literal. For entries which
 already exist in the dynamic table, the full entry can also be used by
 reference, creating a duplicate entry.
 
-### Insert
+### Insert With Name Reference
 
-An addition to the header table starts with the '1' one-bit pattern. This
-instruction can reference an existing table entry and use its name. The `S` bit
-indicates whether the entry is in the static table (where `S` is 1) or the
-dynamic table (where `S` is 0). The index of the entry is represented as an
-integer with an 6-bit prefix (see Section 5.1 of [RFC7541]). Table indices are
-always non-zero; a zero index is reserved for literal names.
+An addition to the header table where the header field name matches the header
+field name of an entry stored in the static table or the dynamic table starts
+with the '1' one-bit pattern.  The `S` bit indicates whether the reference is to
+the static (S=1) or dynamic (S=0) table. The header field name is represented
+using the index of that entry, which is represented as an integer with a 6-bit
+prefix (see Section 5.1 of [RFC7541]). Table indices are always non-zero; a zero
+index MUST be treated as a decoding error.
+
+The header name reference is followed by the header field value represented as a
+string literal (see Section 5.2 of [RFC7541]).
 
 ~~~~~~~~~~ drawing
      0   1   2   3   4   5   6   7
@@ -175,17 +197,21 @@ always non-zero; a zero index is reserved for literal names.
 ~~~~~~~~~~
 {: title="Insert Header Field -- Indexed Name"}
 
-Otherwise, the header field name is represented as a string literal (see Section
-5.2 of [RFC7541]). A value 0 is used in place of the table reference, followed
-by the header field name.
+
+### Insert Without Name Reference
+
+An addition to the header table where both the header field name and the header
+field value are represented as string literals (see {{primitives}}) starts with
+the '01' two-bit pattern.
+
+The name is represented as a 6-bit prefix string literal, while the value is
+represented as an 8-bit prefix string literal.
 
 ~~~~~~~~~~ drawing
      0   1   2   3   4   5   6   7
    +---+---+---+---+---+---+---+---+
-   | 1 | 0 |           0           |
-   +---+---+-----------------------+
-   | H |     Name Length (7+)      |
-   +---+---------------------------+
+   | 0 | 1 | H | Name Length (5+)  |
+   +---+---+---+-------------------+
    |  Name String (Length octets)  |
    +---+---------------------------+
    | H |     Value Length (7+)     |
@@ -195,20 +221,18 @@ by the header field name.
 ~~~~~~~~~~
 {: title="Insert Header Field -- New Name"}
 
-Either form of header field name representation is followed by the header field
-value represented as a string literal (see Section 5.2 of [RFC7541]).
 
 ### Duplicate {#indexed-duplicate}
 
-Duplication of an existing entry in the dynamic table starts with the '0'
-one-bit pattern.  The index of the existing entry is represented as an integer
-with a 7-bit prefix. Table indices are always non-zero; a table index of zero
+Duplication of an existing entry in the dynamic table starts with the '000'
+three-bit pattern.  The index of the existing entry is represented as an integer
+with a 5-bit prefix. Table indices are always non-zero; a table index of zero
 MUST be treated as a decoding error.
 
 ~~~~~~~~~~ drawing
      0   1   2   3   4   5   6   7
    +---+---+---+---+---+---+---+---+
-   | 0 |         Index (7+)        |
+   | 0 | 0 | 0 |    Index (5+)     |
    +---+---------------------------+
 ~~~~~~~~~~
 {:#fig-index-with-duplication title="Duplicate"}
@@ -218,6 +242,31 @@ either the name or the value. This is useful to mitigate the eviction of older
 entries which are frequently referenced, both to avoid the need to resend the
 header and to avoid the entry in the table blocking the ability to insert new
 headers.
+
+### Dynamic Table Size Update
+
+A dynamic table size update signals a change to the size of the dynamic table.
+
+~~~~~~~~~~ drawing
+  0   1   2   3   4   5   6   7
++---+---+---+---+---+---+---+---+
+| 0 | 0 | 1 |   Max size (5+)   |
++---+---------------------------+
+~~~~~~~~~~
+{:#fig-size-change title="Maximum Dynamic Table Size Change"}
+
+A dynamic table size update starts with the '001' 3-bit pattern, followed by the
+new maximum size, represented as an integer with a 5-bit prefix (see Section
+5.1 of [RFC7541]).
+
+The new maximum size MUST be lower than or equal to the limit determined by the
+protocol using QCRAM.  A value that exceeds this limit MUST be treated as a
+decoding error.  In HTTP/QUIC, this limit is the value of the
+SETTINGS_HEADER_TABLE_SIZE parameter (see [QUIC-HTTP]) received from the
+decoder.
+
+Reducing the maximum size of the dynamic table can cause entries to
+be evicted (see Section 4.3 of [RFC7541]).
 
 ## HEADER_ACK Frames {#feedback}
 
